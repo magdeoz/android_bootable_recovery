@@ -226,7 +226,6 @@ GUIAction::GUIAction(xml_node<>* node)
 		ADD_ACTION(resize);
 		ADD_ACTION(changefilesystem);
 		ADD_ACTION(flashimage);
-		ADD_ACTION(twcmd);
 	}
 
 	// First, get the action
@@ -503,7 +502,6 @@ void GUIAction::operation_end(const int operation_status)
 	DataManager::SetValue("tw_operation_state", 1);
 	DataManager::SetValue(TW_ACTION_BUSY, 0);
 	blankTimer.resetTimerAndUnblank();
-	property_set("twrp.action_complete", "1");
 	time(&Stop);
 	if ((int) difftime(Stop, Start) > 10)
 		DataManager::Vibrate("tw_action_vibrate");
@@ -523,6 +521,7 @@ int GUIAction::reboot(std::string arg)
 
 int GUIAction::home(std::string arg __unused)
 {
+	PageManager::SelectPackage("TWRP");
 	gui_changePage("main");
 	return 0;
 }
@@ -537,7 +536,6 @@ int GUIAction::key(std::string arg)
 
 int GUIAction::page(std::string arg)
 {
-	property_set("twrp.action_complete", "0");
 	std::string page_name = gui_parse_text(arg);
 	return gui_changePage(page_name);
 }
@@ -870,7 +868,7 @@ int GUIAction::getpartitiondetails(std::string arg __unused)
 					DataManager::SetValue("tw_partition_vfat", 1);
 				else
 					DataManager::SetValue("tw_partition_vfat", 0);
-				if (TWFunc::Path_Exists("/sbin/mkexfatfs"))
+				if (TWFunc::Path_Exists("/sbin/mkfs.exfat"))
 					DataManager::SetValue("tw_partition_exfat", 1);
 				else
 					DataManager::SetValue("tw_partition_exfat", 0);
@@ -928,7 +926,7 @@ int GUIAction::screenshot(std::string arg __unused)
 		chmod(path, 0666);
 		chown(path, uid, gid);
 
-		gui_msg(Msg("screenshot_saved=Screenshot was saved to {1}")(path));
+		gui_msg(Msg("screenshot_saved=Screenshot was saved to %s")(path));
 
 		// blink to notify that the screenshow was taken
 		gr_color(255, 255, 255, 255);
@@ -1453,6 +1451,7 @@ int GUIAction::decrypt(std::string arg __unused)
 					LOGINFO("Got default contexts and file mode for storage files.\n");
 				}
 			}
+			PartitionManager.Decrypt_Adopted();
 		}
 	}
 
@@ -1536,12 +1535,41 @@ int GUIAction::adbsideloadcancel(std::string arg __unused)
 
 int GUIAction::openrecoveryscript(std::string arg __unused)
 {
+	int op_status = 1;
+
 	operation_start("OpenRecoveryScript");
 	if (simulate) {
 		simulate_progress_bar();
 		operation_end(0);
 	} else {
-		int op_status = OpenRecoveryScript::Run_OpenRecoveryScript_Action();
+		// Check for the SCRIPT_FILE_TMP first as these are AOSP recovery commands
+		// that we converted to ORS commands during boot in recovery.cpp.
+		// Run those first.
+		int reboot = 0;
+		if (TWFunc::Path_Exists(SCRIPT_FILE_TMP)) {
+			gui_msg("running_recovery_commands=Running Recovery Commands");
+			if (OpenRecoveryScript::run_script_file() == 0) {
+				reboot = 1;
+				op_status = 0;
+			}
+		}
+		// Check for the ORS file in /cache and attempt to run those commands.
+		if (OpenRecoveryScript::check_for_script_file()) {
+			gui_msg("running_ors=Running OpenRecoveryScript");
+			if (OpenRecoveryScript::run_script_file() == 0) {
+				reboot = 1;
+				op_status = 0;
+			}
+		}
+		if (reboot) {
+			// Disable stock recovery reflashing
+			TWFunc::Disable_Stock_Recovery_Replace();
+			usleep(2000000); // Sleep for 2 seconds before rebooting
+			TWFunc::tw_reboot(rb_system);
+			usleep(5000000); // Sleep for 5 seconds to allow reboot to occur
+		} else {
+			DataManager::SetValue("tw_page_done", 1);
+		}
 		operation_end(op_status);
 	}
 	return 0;
@@ -1711,17 +1739,6 @@ int GUIAction::flashimage(std::string arg __unused)
 		op_status = 1; // fail
 
 	operation_end(op_status);
-	return 0;
-}
-
-int GUIAction::twcmd(std::string arg)
-{
-	operation_start("TWRP CLI Command");
-	if (simulate)
-		simulate_progress_bar();
-	else
-		OpenRecoveryScript::Run_CLI_Command(arg.c_str());
-	operation_end(0);
 	return 0;
 }
 

@@ -165,6 +165,9 @@ int TWPartitionManager::Process_Fstab(string Fstab_Filename, bool Display_Error)
 			DataManager::SetValue("TW_CRYPTO_TYPE", password_type);
 		}
 	}
+	if (Decrypt_Data && (!Decrypt_Data->Is_Encrypted || Decrypt_Data->Is_Decrypted) && Decrypt_Data->Mount(false)) {
+		Decrypt_Adopted();
+	}
 #endif
 	Update_System_Details();
 	UnMount_Main_Partitions();
@@ -1395,8 +1398,34 @@ void TWPartitionManager::Update_System_Details(void) {
 	if (FreeStorage != NULL) {
 		// Attempt to mount storage
 		if (!FreeStorage->Mount(false)) {
-			gui_msg(Msg(msg::kError, "unable_to_mount_storage=Unable to mount storage"));
-			DataManager::SetValue(TW_STORAGE_FREE_SIZE, 0);
+			// We couldn't mount storage... check to see if we have dual storage
+			int has_dual_storage;
+			DataManager::GetValue(TW_HAS_DUAL_STORAGE, has_dual_storage);
+			if (has_dual_storage == 1) {
+				// We have dual storage, see if we're using the internal storage that should always be present
+				if (current_storage_path == DataManager::GetSettingsStoragePath()) {
+					if (!FreeStorage->Is_Encrypted) {
+						// Not able to use internal, so error!
+						gui_msg(Msg(msg::kError, "unable_to_mount_internal=Unable to mount internal_storage"));
+					}
+					DataManager::SetValue(TW_STORAGE_FREE_SIZE, 0);
+				} else {
+					// We were using external, flip to internal
+					DataManager::SetValue(TW_USE_EXTERNAL_STORAGE, 0);
+					current_storage_path = DataManager::GetCurrentStoragePath();
+					FreeStorage = Find_Partition_By_Path(current_storage_path);
+					if (FreeStorage != NULL) {
+						DataManager::SetValue(TW_STORAGE_FREE_SIZE, (int)(FreeStorage->Free / 1048576LLU));
+					} else {
+						gui_msg(Msg(msg::kError, "unable_to_locate=Unable to locate {1}")("internal storage partition"));
+						DataManager::SetValue(TW_STORAGE_FREE_SIZE, 0);
+					}
+				}
+			} else {
+				// No dual storage and unable to mount storage, error!
+				gui_msg(Msg(msg::kError, "unable_to_mount_storage=Unable to mount storage"));
+				DataManager::SetValue(TW_STORAGE_FREE_SIZE, 0);
+			}
 		} else {
 			DataManager::SetValue(TW_STORAGE_FREE_SIZE, (int)(FreeStorage->Free / 1048576LLU));
 		}
@@ -2283,4 +2312,18 @@ void TWPartitionManager::Translate_Partition_Display_Names() {
 
 	// This updates the text on all of the storage selection buttons in the GUI
 	DataManager::SetBackupFolder();
+}
+
+void TWPartitionManager::Decrypt_Adopted() {
+	if (!Mount_By_Path("/data", false)) {
+		LOGERR("Cannot decrypt adopted storage because /data will not mount\n");
+		return;
+	}
+	std::vector<TWPartition*>::iterator adopt;
+	for (adopt = Partitions.begin(); adopt != Partitions.end(); adopt++) {
+		if ((*adopt)->Is_Adopted_Storage) {
+			(*adopt)->Decrypt_Adopted();
+			Output_Partition((*adopt));
+		}
+	}
 }

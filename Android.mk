@@ -28,14 +28,14 @@ endif
 
 ifeq ($(PROJECT_PATH_AGREES),true)
 
-ifneq (,$(filter $(PLATFORM_SDK_VERSION), 21 22))
+ifeq ($(shell test $(PLATFORM_SDK_VERSION) -gt 20; echo $$?),0)
 # Make recovery domain permissive for TWRP
     BOARD_SEPOLICY_UNION += twrp.te
 endif
 
 include $(CLEAR_VARS)
 
-TWRES_PATH := /twres/
+TWRES_PATH := "/twres/"
 TWHTCD_PATH := $(TWRES_PATH)htcd/
 
 TARGET_RECOVERY_GUI := true
@@ -100,10 +100,7 @@ LOCAL_C_INCLUDES += \
     system/extras/ext4_utils \
     system/core/adb \
 
-LOCAL_C_INCLUDES += bionic external/openssl/include $(LOCAL_PATH)/libmincrypt/includes
-ifeq ($(shell test $(PLATFORM_SDK_VERSION) -lt 23; echo $$?),0)
-    LOCAL_C_INCLUDES += external/stlport/stlport
-endif
+LOCAL_C_INCLUDES += bionic external/stlport/stlport external/openssl/include $(LOCAL_PATH)/libmincrypt/includes
 
 LOCAL_STATIC_LIBRARIES :=
 LOCAL_SHARED_LIBRARIES :=
@@ -112,7 +109,7 @@ LOCAL_STATIC_LIBRARIES += libguitwrp
 LOCAL_SHARED_LIBRARIES += libz libc libcutils libstdc++ libtar libblkid libminuitwrp libminadbd libmtdutils libminzip libaosprecovery
 LOCAL_SHARED_LIBRARIES += libcrecovery
 
-ifeq ($(shell test $(PLATFORM_SDK_VERSION) -lt 23; echo $$?),0)
+ifeq (,$(filter $(PLATFORM_SDK_VERSION), 23))
     LOCAL_SHARED_LIBRARIES += libstlport
 else
     LOCAL_SHARED_LIBRARIES += libc++
@@ -287,7 +284,7 @@ ifeq ($(TW_INCLUDE_L_CRYPTO), true)
 endif
 ifeq ($(TW_INCLUDE_CRYPTO), true)
     LOCAL_CFLAGS += -DTW_INCLUDE_CRYPTO
-    LOCAL_SHARED_LIBRARIES += libcryptfslollipop
+    LOCAL_SHARED_LIBRARIES += libcryptfslollipop libgpt_twrp
     LOCAL_C_INCLUDES += external/boringssl/src/include
 endif
 ifeq ($(TW_USE_MODEL_HARDWARE_ID_FOR_DEVICE_ID), true)
@@ -301,9 +298,6 @@ ifneq ($(TW_SECONDARY_BRIGHTNESS_PATH),)
 endif
 ifneq ($(TW_MAX_BRIGHTNESS),)
 	LOCAL_CFLAGS += -DTW_MAX_BRIGHTNESS=$(TW_MAX_BRIGHTNESS)
-endif
-ifneq ($(TW_DEFAULT_BRIGHTNESS),)
-	LOCAL_CFLAGS += -DTW_DEFAULT_BRIGHTNESS=$(TW_DEFAULT_BRIGHTNESS)
 endif
 ifneq ($(TW_CUSTOM_BATTERY_PATH),)
 	LOCAL_CFLAGS += -DTW_CUSTOM_BATTERY_PATH=$(TW_CUSTOM_BATTERY_PATH)
@@ -374,7 +368,7 @@ else
     endif
 endif
 ifneq ($(TW_NO_EXFAT), true)
-    LOCAL_ADDITIONAL_DEPENDENCIES += mkexfatfs fsckexfat
+    LOCAL_ADDITIONAL_DEPENDENCIES += mkexfatfs
 endif
 ifeq ($(BOARD_HAS_NO_REAL_SDCARD),)
     LOCAL_ADDITIONAL_DEPENDENCIES += parted
@@ -420,13 +414,6 @@ ifeq ($(TW_INCLUDE_NTFS_3G),true)
         ntfs-3g \
         ntfsfix \
         mkntfs
-endif
-ifeq ($(TARGET_USERIMAGES_USE_F2FS), true)
-ifeq ($(shell test $(CM_PLATFORM_SDK_VERSION) -ge 3; echo $$?),0)
-    LOCAL_ADDITIONAL_DEPENDENCIES += \
-        fsck.f2fs \
-        mkfs.f2fs
-endif
 endif
 
 include $(BUILD_EXECUTABLE)
@@ -570,18 +557,18 @@ include $(commands_recovery_local_path)/injecttwrp/Android.mk \
 ifeq ($(TW_INCLUDE_CRYPTO), true)
     include $(commands_recovery_local_path)/crypto/lollipop/Android.mk
     include $(commands_recovery_local_path)/crypto/scrypt/Android.mk
+    include $(commands_recovery_local_path)/gpt/Android.mk
 endif
 ifeq ($(BUILD_ID), GINGERBREAD)
     TW_NO_EXFAT := true
 endif
 ifneq ($(TW_NO_EXFAT), true)
     include $(commands_recovery_local_path)/exfat/mkfs/Android.mk \
-            $(commands_recovery_local_path)/exfat/fsck/Android.mk \
             $(commands_recovery_local_path)/fuse/Android.mk \
             $(commands_recovery_local_path)/exfat/libexfat/Android.mk
 endif
 ifneq ($(TW_NO_EXFAT_FUSE), true)
-    include $(commands_recovery_local_path)/exfat/fuse/Android.mk
+    include $(commands_recovery_local_path)/exfat/exfat-fuse/Android.mk
 endif
 ifneq ($(TW_OEM_BUILD),true)
     include $(commands_recovery_local_path)/orscmd/Android.mk
